@@ -178,3 +178,167 @@ app.get('/api/sprints/:sprintId/issues', async (req, res) => {
     res.status(error.response?.status || 500).json({
       error: 'Failed to fetch sprint issues',
       details: error.response?.data || error.message
+    });
+  }
+});
+
+// Get a single issue details
+app.get('/api/issues/:issueKey', async (req, res) => {
+  try {
+    const { issueKey } = req.params;
+    
+    const response = await jiraApi.get(`/rest/api/3/issue/${issueKey}`, {
+      params: {
+        fields: 'summary,status,assignee,issuetype,priority,description,created,updated,labels,comment'
+      }
+    });
+    
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching issue:', error.response?.data || error.message);
+    res.status(error.response?.status || 500).json({
+      error: 'Failed to fetch issue',
+      details: error.response?.data || error.message
+    });
+  }
+});
+
+// Get all Jira fields (for discovering custom field IDs)
+app.get('/api/fields', async (req, res) => {
+  try {
+    const { search } = req.query;
+    
+    const response = await jiraApi.get('/rest/api/3/field');
+    
+    let fields = response.data;
+    
+    // Filter by search term if provided
+    if (search) {
+      const searchLower = search.toLowerCase();
+      fields = fields.filter(field => 
+        field.name.toLowerCase().includes(searchLower) ||
+        field.id.toLowerCase().includes(searchLower)
+      );
+    }
+    
+    // Return simplified field info
+    const simplifiedFields = fields.map(field => ({
+      id: field.id,
+      name: field.name,
+      custom: field.custom,
+      schema: field.schema
+    }));
+    
+    res.json({
+      total: simplifiedFields.length,
+      fields: simplifiedFields
+    });
+  } catch (error) {
+    console.error('Error fetching fields:', error.response?.data || error.message);
+    res.status(error.response?.status || 500).json({
+      error: 'Failed to fetch fields',
+      details: error.response?.data || error.message
+    });
+  }
+});
+
+// Update labels for an issue
+app.put('/api/issues/:issueKey/labels', async (req, res) => {
+  try {
+    const { issueKey } = req.params;
+    const { labels } = req.body;
+    
+    if (!Array.isArray(labels)) {
+      return res.status(400).json({ error: 'Labels must be an array' });
+    }
+    
+    await jiraApi.put(`/rest/api/3/issue/${issueKey}`, {
+      fields: {
+        labels: labels
+      }
+    });
+    
+    res.json({ success: true, message: 'Labels updated successfully' });
+  } catch (error) {
+    console.error('Error updating labels:', error.response?.data || error.message);
+    res.status(error.response?.status || 500).json({
+      error: 'Failed to update labels',
+      details: error.response?.data || error.message
+    });
+  }
+});
+
+// Add label to an issue (append)
+app.post('/api/issues/:issueKey/labels', async (req, res) => {
+  try {
+    const { issueKey } = req.params;
+    const { label } = req.body;
+    
+    if (!label) {
+      return res.status(400).json({ error: 'Label is required' });
+    }
+    
+    // Use the update operation to add a label
+    await jiraApi.put(`/rest/api/3/issue/${issueKey}`, {
+      update: {
+        labels: [{ add: label }]
+      }
+    });
+    
+    res.json({ success: true, message: 'Label added successfully' });
+  } catch (error) {
+    console.error('Error adding label:', error.response?.data || error.message);
+    res.status(error.response?.status || 500).json({
+      error: 'Failed to add label',
+      details: error.response?.data || error.message
+    });
+  }
+});
+
+// ============ MS Teams Integration (Webhook) ============
+
+// Check Teams integration status
+app.get('/api/teams/status', (req, res) => {
+  res.json({
+    configured: teamsService.isConfigured(),
+    message: teamsService.isConfigured() 
+      ? 'MS Teams webhook is ready' 
+      : 'MS Teams not configured. Add TEAMS_WEBHOOK_URL to .env file.'
+  });
+});
+
+// Send notifications to Teams channel about non-ready issues
+app.post('/api/teams/notify', async (req, res) => {
+  try {
+    const { issues, sprintName } = req.body;
+    
+    if (!teamsService.isConfigured()) {
+      return res.status(400).json({
+        success: false,
+        error: 'MS Teams webhook not configured. Add TEAMS_WEBHOOK_URL to your .env file.'
+      });
+    }
+    
+    if (!issues || !Array.isArray(issues)) {
+      return res.status(400).json({ error: 'Issues array is required' });
+    }
+    
+    const result = await teamsService.notifyUsersAboutIssues(issues, sprintName || 'Current Sprint');
+    res.json(result);
+  } catch (error) {
+    console.error('Error sending Teams notification:', error.message);
+    res.status(500).json({
+      error: 'Failed to send Teams notification',
+      details: error.message
+    });
+  }
+});
+
+// Initialize Teams service
+teamsService.initialize();
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`🚀 Jira Dashboard API server running on http://localhost:${PORT}`);
+  console.log(`📋 Jira Domain: ${JIRA_DOMAIN || 'NOT CONFIGURED'}`);
+});
