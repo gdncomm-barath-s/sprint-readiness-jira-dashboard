@@ -778,3 +778,248 @@ const getLabelColor = (index: number) => {
             
             <!-- Issues in this group -->
             <tr 
+              v-for="issue in group.issues" 
+              :key="issue.key"
+              :class="[
+                'transition-colors',
+                getIssueStatus(issue).isReady 
+                  ? 'hover:bg-gray-50' 
+                  : 'bg-red-50 hover:bg-red-100'
+              ]"
+            >
+            <!-- Ready Status -->
+            <td class="px-4 py-3 whitespace-nowrap">
+              <div 
+                v-if="getIssueStatus(issue).isReady"
+                class="flex items-center justify-center"
+              >
+                <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100">
+                  <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                </span>
+              </div>
+              <div 
+                v-else 
+                class="flex items-center justify-center"
+                :title="getIssueStatus(issue).warnings.join(', ')"
+              >
+                <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-red-100">
+                  <svg class="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </span>
+              </div>
+            </td>
+            
+            <!-- Type -->
+            <td class="px-4 py-3 whitespace-nowrap">
+              <span 
+                :class="getIssueTypeIcon(issue.issueType.name).color"
+                :title="issue.issueType.name"
+              >
+                {{ getIssueTypeIcon(issue.issueType.name).icon }}
+              </span>
+            </td>
+            
+            <!-- Key -->
+            <td class="px-4 py-3 whitespace-nowrap">
+              <a 
+                :href="getIssueUrl(issue.key)" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                class="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline"
+              >
+                {{ issue.key }}
+              </a>
+            </td>
+            
+            <!-- Summary -->
+            <td class="px-4 py-3">
+              <div class="flex items-center gap-2">
+                <span class="text-sm text-gray-900">{{ issue.summary }}</span>
+                <img 
+                  v-if="issue.assignee"
+                  :src="issue.assignee.avatarUrls['16x16']" 
+                  :alt="issue.assignee.displayName"
+                  :title="issue.assignee.displayName"
+                  class="w-5 h-5 rounded-full"
+                />
+              </div>
+              <!-- Warnings below summary -->
+              <div v-if="!getIssueStatus(issue).isReady" class="mt-1 flex flex-wrap gap-1">
+                <span 
+                  v-for="warning in getIssueStatus(issue).warnings" 
+                  :key="warning"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700"
+                >
+                  {{ warning }}
+                </span>
+              </div>
+            </td>
+            
+            <!-- Estimate -->
+            <td class="px-4 py-3 whitespace-nowrap">
+              <template v-if="getSubtasks(issue.key).length > 0">
+                <!-- Has subtasks - show subtask estimate summary -->
+                <div class="text-sm">
+                  <span 
+                    :class="[
+                      hasEstimateOrSubtaskEstimates(issue).estimatedSubtasks > 0 
+                        ? 'text-gray-700' 
+                        : 'text-red-500 font-medium'
+                    ]"
+                  >
+                    {{ (getSubtasks(issue.key).reduce((sum, st) => sum + (st.timeTracking?.originalEstimateSeconds || 0), 0) / (8 * 60 * 60)).toFixed(1) }}d
+                  </span>
+                  <span class="text-xs text-gray-400 ml-1">
+                    ({{ hasEstimateOrSubtaskEstimates(issue).estimatedSubtasks }}/{{ hasEstimateOrSubtaskEstimates(issue).subtaskCount }} subtasks)
+                  </span>
+                </div>
+              </template>
+              <template v-else>
+                <!-- No subtasks - show issue's own estimate -->
+                <span 
+                  v-if="issue.timeTracking?.originalEstimateSeconds"
+                  class="text-sm text-gray-700"
+                >
+                  {{ (issue.timeTracking.originalEstimateSeconds / (8 * 60 * 60)).toFixed(1) }}d
+                </span>
+                <span v-else class="text-sm text-red-500 font-medium">0</span>
+              </template>
+            </td>
+            
+            <!-- Labels -->
+            <td class="px-4 py-3">
+              <div class="flex flex-wrap gap-1">
+                <span 
+                  v-for="(label, idx) in issue.labels.slice(0, 3)" 
+                  :key="label"
+                  :class="[
+                    'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium',
+                    getLabelColor(idx)
+                  ]"
+                >
+                  {{ label }}
+                </span>
+                <span 
+                  v-if="issue.labels.length > 3"
+                  class="text-xs text-gray-500"
+                >
+                  +{{ issue.labels.length - 3 }}
+                </span>
+                <span v-if="issue.labels.length === 0" class="text-sm text-red-500 font-medium">Missing</span>
+              </div>
+            </td>
+            
+            <!-- Components -->
+            <td class="px-4 py-3">
+              <div class="flex flex-wrap gap-1">
+                <span 
+                  v-for="component in issue.components.slice(0, 2)" 
+                  :key="component.id"
+                  class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800"
+                >
+                  {{ component.name }}
+                </span>
+                <span 
+                  v-if="issue.components.length > 2"
+                  class="text-xs text-gray-500"
+                >
+                  +{{ issue.components.length - 2 }}
+                </span>
+                <span v-if="issue.components.length === 0" class="text-sm text-red-500 font-medium">Missing</span>
+              </div>
+            </td>
+            
+            <!-- Completion Criteria -->
+            <td class="px-4 py-3">
+              <span 
+                v-if="issue.completionCriteria"
+                class="text-sm text-gray-700"
+                :title="issue.completionCriteria"
+              >
+                {{ truncateText(issue.completionCriteria, 40) }}
+              </span>
+              <span 
+                v-else 
+                :class="[
+                  'text-sm italic',
+                  issue.issueType.name.toLowerCase() === 'story' ? 'text-red-500 font-medium' : 'text-gray-400'
+                ]"
+              >
+                {{ issue.issueType.name.toLowerCase() === 'story' ? 'Missing' : '-' }}
+              </span>
+            </td>
+            
+            <!-- Web Live Date -->
+            <td class="px-4 py-3 whitespace-nowrap">
+              <span 
+                v-if="issue.webLiveDate"
+                :class="[
+                  'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium',
+                  getDateStatus(issue.webLiveDate) === 'overdue' ? 'bg-red-100 text-red-800' :
+                  getDateStatus(issue.webLiveDate) === 'upcoming' ? 'bg-amber-100 text-amber-800' :
+                  'bg-green-100 text-green-800'
+                ]"
+              >
+                {{ formatDate(issue.webLiveDate) }}
+              </span>
+              <span 
+                v-else 
+                :class="[
+                  'text-sm',
+                  issue.labels.some(l => ['feature', 'bug', 'tech debt', 'tech-debt', 'techdebt'].some(req => l.toLowerCase().includes(req)))
+                    ? 'text-red-500 font-medium' 
+                    : 'text-gray-400'
+                ]"
+              >
+                {{ issue.labels.some(l => ['feature', 'bug', 'tech debt', 'tech-debt', 'techdebt'].some(req => l.toLowerCase().includes(req))) ? 'Missing' : '-' }}
+              </span>
+            </td>
+            
+            <!-- Due Date -->
+            <td class="px-4 py-3 whitespace-nowrap">
+              <span 
+                v-if="issue.dueDate"
+                :class="[
+                  'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium',
+                  getDateStatus(issue.dueDate) === 'overdue' ? 'bg-red-100 text-red-800' :
+                  getDateStatus(issue.dueDate) === 'upcoming' ? 'bg-amber-100 text-amber-800' :
+                  'bg-green-100 text-green-800'
+                ]"
+              >
+                {{ formatDate(issue.dueDate) }}
+              </span>
+              <span v-else class="text-sm text-gray-400">-</span>
+            </td>
+            
+            <!-- Status -->
+            <td class="px-4 py-3 whitespace-nowrap">
+              <span 
+                :class="[
+                  'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium',
+                  issue.status.statusCategory.key === 'done' ? 'bg-green-100 text-green-800' :
+                  issue.status.statusCategory.key === 'indeterminate' ? 'bg-yellow-100 text-yellow-800' :
+                  'bg-blue-100 text-blue-800'
+                ]"
+              >
+                {{ issue.status.name }}
+              </span>
+            </td>
+          </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    
+    <!-- Empty State -->
+    <div v-if="filteredIssues.length === 0" class="px-6 py-12 text-center">
+      <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+      </svg>
+      <h3 class="mt-2 text-sm font-medium text-gray-900">No issues found</h3>
+      <p class="mt-1 text-sm text-gray-500">Select a sprint to view issue details.</p>
+    </div>
+  </div>
+</template>
