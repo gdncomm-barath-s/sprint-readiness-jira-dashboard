@@ -518,3 +518,263 @@ const getLabelColor = (index: number) => {
             :class="[
               'flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors',
               !showOnlyNotReady 
+                ? 'bg-green-100 ring-2 ring-green-500' 
+                : 'hover:bg-green-50'
+            ]"
+          >
+            <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100">
+              <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+              </svg>
+            </span>
+            <span class="text-sm font-medium text-green-700">
+              {{ props.issues.filter(i => !i.issueType.subtask && !shouldExcludeIssue(i) && isOpen(i) && getIssueStatus(i).isReady).length }} Ready
+            </span>
+          </button>
+          
+          <!-- Not Ready Count (clickable filter) -->
+          <button
+            @click="showOnlyNotReady = !showOnlyNotReady"
+            :class="[
+              'flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors',
+              showOnlyNotReady 
+                ? 'bg-red-100 ring-2 ring-red-500' 
+                : 'hover:bg-red-50'
+            ]"
+            title="Click to filter only not ready issues"
+          >
+            <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-red-100">
+              <svg class="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </span>
+            <span class="text-sm font-medium text-red-700">
+              {{ props.issues.filter(i => !i.issueType.subtask && !shouldExcludeIssue(i) && isOpen(i) && !getIssueStatus(i).isReady).length }} Not Ready
+            </span>
+            <span v-if="showOnlyNotReady" class="text-xs text-red-600">(filtered)</span>
+          </button>
+          
+          <!-- Teams Notification Button -->
+          <button
+            v-if="issuesWithWarnings.length > 0"
+            @click="sendTeamsNotifications"
+            :disabled="sendingNotifications || !teamsConfigured"
+            :class="[
+              'inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors',
+              teamsConfigured
+                ? 'bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            ]"
+            :title="teamsConfigured ? 'Send Teams notifications to users' : 'MS Teams not configured'"
+          >
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19.2 6.4h-2.4V4.8c0-1.32-1.08-2.4-2.4-2.4H9.6c-1.32 0-2.4 1.08-2.4 2.4v1.6H4.8c-.88 0-1.6.72-1.6 1.6v10.4c0 .88.72 1.6 1.6 1.6h14.4c.88 0 1.6-.72 1.6-1.6V8c0-.88-.72-1.6-1.6-1.6zM8.8 4.8c0-.44.36-.8.8-.8h4.8c.44 0 .8.36.8.8v1.6H8.8V4.8zM19.2 18.4H4.8V8h14.4v10.4z"/>
+              <path d="M12 10.4c-1.32 0-2.4 1.08-2.4 2.4s1.08 2.4 2.4 2.4 2.4-1.08 2.4-2.4-1.08-2.4-2.4-2.4z"/>
+            </svg>
+            {{ sendingNotifications ? 'Sending...' : 'Notify via Teams' }}
+          </button>
+        </div>
+      </div>
+      
+      <!-- Notification Result -->
+      <div 
+        v-if="notificationResult" 
+        :class="[
+          'mt-3 px-4 py-2 rounded-lg text-sm',
+          notificationResult.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+        ]"
+      >
+        {{ notificationResult.message }}
+      </div>
+      
+      <!-- Teams Not Configured Warning -->
+      <div 
+        v-if="!teamsConfigured && issuesWithWarnings.length > 0" 
+        class="mt-3 px-4 py-2 rounded-lg text-sm bg-amber-50 text-amber-800"
+      >
+        MS Teams integration not configured. Add TEAMS_WEBHOOK_URL to .env file to enable channel notifications.
+      </div>
+      
+      <!-- Filter Panel -->
+      <div v-if="showFilters" class="mt-4 p-4 bg-white border border-gray-200 rounded-lg">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <!-- Exclude Users -->
+          <div>
+            <h4 class="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+              <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              Exclude Users
+            </h4>
+            <div class="max-h-48 overflow-y-auto space-y-1">
+              <label 
+                v-for="user in allUsers" 
+                :key="user.accountId"
+                class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer"
+              >
+                <input 
+                  type="checkbox" 
+                  :checked="excludedUserIds.has(user.accountId)"
+                  @change="toggleUserExclusion(user.accountId)"
+                  class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <img :src="user.avatarUrl" :alt="user.displayName" class="w-5 h-5 rounded-full" />
+                <span class="text-sm text-gray-700">{{ user.displayName }}</span>
+              </label>
+              <p v-if="allUsers.length === 0" class="text-sm text-gray-500 italic px-2">No users found</p>
+            </div>
+          </div>
+          
+          <!-- Exclude Labels -->
+          <div>
+            <h4 class="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+              <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+              </svg>
+              Exclude Labels
+            </h4>
+            <div class="max-h-48 overflow-y-auto space-y-1">
+              <label 
+                v-for="label in allLabels" 
+                :key="label"
+                class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer"
+              >
+                <input 
+                  type="checkbox" 
+                  :checked="excludedLabels.has(label)"
+                  @change="toggleLabelExclusion(label)"
+                  class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                  {{ label }}
+                </span>
+              </label>
+              <p v-if="allLabels.length === 0" class="text-sm text-gray-500 italic px-2">No labels found</p>
+            </div>
+          </div>
+          
+          <!-- Skip Web Live Date Validation -->
+          <div>
+            <h4 class="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+              <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              Skip Web Live Date Check
+            </h4>
+            <p class="text-xs text-gray-500 mb-2">Issues with these labels won't be flagged for missing web live date</p>
+            <div class="max-h-40 overflow-y-auto space-y-1">
+              <label 
+                v-for="label in allLabels" 
+                :key="'skip-' + label"
+                class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer"
+              >
+                <input 
+                  type="checkbox" 
+                  :checked="skipWebLiveDateLabels.has(label)"
+                  @change="toggleSkipWebLiveDate(label)"
+                  class="rounded border-gray-300 text-green-600 focus:ring-green-500"
+                />
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                  {{ label }}
+                </span>
+              </label>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Filter Summary -->
+        <div class="mt-4 pt-3 border-t border-gray-200 flex items-center justify-between">
+          <p class="text-sm text-gray-600">
+            Excluding {{ excludedUserIds.size }} user(s) and {{ excludedLabels.size }} label(s)
+            <span v-if="skipWebLiveDateLabels.size > 0">
+              • Skipping web live date for {{ skipWebLiveDateLabels.size }} label(s)
+            </span>
+          </p>
+          <button
+            @click="excludedUserIds = new Set(); excludedLabels = new Set(); skipWebLiveDateLabels = new Set(['automation'])"
+            class="text-sm text-blue-600 hover:text-blue-800 font-medium"
+          >
+            Reset Filters
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+              Ready
+            </th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
+              Type
+            </th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
+              Key
+            </th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">
+              Summary
+            </th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
+              Estimate
+            </th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Labels
+            </th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Components
+            </th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">
+              Completion Criteria
+            </th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
+              Web Live Date
+            </th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
+              Due Date
+            </th>
+            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
+              Status
+            </th>
+          </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200">
+          <!-- Grouped by Assignee -->
+          <template v-for="group in issuesGroupedByAssignee" :key="group.displayName">
+            <!-- Assignee Group Header -->
+            <tr class="bg-gray-100 border-t-2 border-gray-300">
+              <td colspan="11" class="px-4 py-3">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <img 
+                      v-if="group.assignee"
+                      :src="group.assignee.avatarUrls['24x24']" 
+                      :alt="group.displayName"
+                      class="w-7 h-7 rounded-full"
+                    />
+                    <div 
+                      v-else 
+                      class="w-7 h-7 rounded-full bg-gray-300 flex items-center justify-center"
+                    >
+                      <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                    </div>
+                    <span class="font-semibold text-gray-900">{{ group.displayName }}</span>
+                    <span class="text-sm text-gray-500">({{ group.issues.length }} issues)</span>
+                  </div>
+                  <div class="flex items-center gap-4">
+                    <span class="text-sm text-green-700">
+                      <span class="font-medium">{{ group.readyCount }}</span> ready
+                    </span>
+                    <span class="text-sm text-red-700">
+                      <span class="font-medium">{{ group.notReadyCount }}</span> not ready
+                    </span>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            
+            <!-- Issues in this group -->
+            <tr 
