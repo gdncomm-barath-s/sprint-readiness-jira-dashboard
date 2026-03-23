@@ -258,3 +258,263 @@ const hasEstimateOrSubtaskEstimates = (issue: JiraIssue): { hasEstimate: boolean
 const LABELS_SKIP_VALIDATION = ['cross_collab', 'cross-collab', 'crosscollab', 'cross collab', 'support']
 
 // Check if issue has a label that skips certain validations
+const shouldSkipValidation = (issue: JiraIssue): boolean => {
+  return issue.labels.some(label => 
+    LABELS_SKIP_VALIDATION.some(skip => label.toLowerCase().includes(skip.toLowerCase()))
+  )
+}
+
+// Check if issue is missing required fields (not ready)
+const getIssueStatus = (issue: JiraIssue) => {
+  const warnings: string[] = []
+  const skipValidation = shouldSkipValidation(issue)
+  
+  // Check for missing labels - ALL issues
+  if (issue.labels.length === 0) {
+    warnings.push('No labels')
+  }
+  
+  // Check for missing completion criteria - ALL issues, skip for cross_collab/support
+  if (!skipValidation && !issue.completionCriteria) {
+    warnings.push('No completion criteria')
+  }
+  
+  // Check for missing components - ALL issues, skip for cross_collab/support
+  if (!skipValidation && issue.components.length === 0) {
+    warnings.push('No component')
+  }
+  
+  // Check for missing web live date - ONLY when Completion Criteria is "live"
+  const completionCriteriaIsLive = issue.completionCriteria?.toLowerCase() === 'live'
+  
+  if (completionCriteriaIsLive && !issue.webLiveDate) {
+    warnings.push('No web live date')
+  }
+  
+  // Check for missing estimates - ALL issues, skip for cross_collab/support
+  if (!skipValidation) {
+    const estimateInfo = hasEstimateOrSubtaskEstimates(issue)
+    if (!estimateInfo.hasEstimate) {
+      if (estimateInfo.subtaskCount > 0) {
+        warnings.push(`No subtask estimates (0/${estimateInfo.subtaskCount})`)
+      } else {
+        warnings.push('No estimate')
+      }
+    } else if (estimateInfo.subtaskCount > 0 && estimateInfo.estimatedSubtasks < estimateInfo.subtaskCount) {
+      // Some subtasks missing estimates
+      warnings.push(`Partial estimates (${estimateInfo.estimatedSubtasks}/${estimateInfo.subtaskCount} subtasks)`)
+    }
+  }
+  
+  // Check for missing due date - ALL issues
+  if (!issue.dueDate) {
+    warnings.push('No due date')
+  }
+  
+  return {
+    isReady: warnings.length === 0,
+    warnings
+  }
+}
+
+// Get all issues with warnings (not ready)
+const issuesWithWarnings = computed(() => {
+  return filteredIssues.value
+    .map(issue => ({
+      issue,
+      ...getIssueStatus(issue)
+    }))
+    .filter(item => !item.isReady)
+})
+
+// Group issues by assignee for notification
+const issuesByAssignee = computed(() => {
+  const groups = new Map<string, { displayName: string; email: string | null; issues: typeof issuesWithWarnings.value }>()
+  
+  for (const item of issuesWithWarnings.value) {
+    const key = item.issue.assignee?.accountId || 'unassigned'
+    const email = item.issue.assignee?.emailAddress || null
+    
+    if (!groups.has(key)) {
+      groups.set(key, {
+        displayName: item.issue.assignee?.displayName || 'Unassigned',
+        email,
+        issues: []
+      })
+    }
+    groups.get(key)!.issues.push(item)
+  }
+  
+  return Array.from(groups.values())
+})
+
+// Send Teams notifications to all users
+const sendTeamsNotifications = async () => {
+  sendingNotifications.value = true
+  notificationResult.value = null
+  
+  try {
+    const response = await axios.post('/api/teams/notify', {
+      issues: issuesWithWarnings.value.map(item => ({
+        issue: item.issue,
+        warnings: item.warnings
+      })),
+      sprintName: props.sprintName || 'Current Sprint'
+    })
+    
+    notificationResult.value = {
+      success: true,
+      message: response.data.message || 'Notification sent to Teams channel'
+    }
+  } catch (error: any) {
+    notificationResult.value = {
+      success: false,
+      message: error.response?.data?.error || 'Failed to send notifications'
+    }
+  } finally {
+    sendingNotifications.value = false
+    
+    // Clear message after 5 seconds
+    setTimeout(() => {
+      notificationResult.value = null
+    }, 5000)
+  }
+}
+
+// Send notification to a single user
+const sendNotificationToUser = async (email: string, issues: typeof issuesWithWarnings.value) => {
+  if (!email) {
+    notificationResult.value = {
+      success: false,
+      message: 'User has no email address'
+    }
+    return
+  }
+  
+  sendingNotifications.value = true
+  notificationResult.value = null
+  
+  try {
+    await axios.post('/api/teams/notify-user', {
+      email,
+      issues: issues.map(item => ({
+        key: item.issue.key,
+        summary: item.issue.summary,
+        warnings: item.warnings
+      })),
+      sprintName: props.sprintName || 'Current Sprint'
+    })
+    
+    notificationResult.value = {
+      success: true,
+      message: `Notification sent to ${email}`
+    }
+  } catch (error: any) {
+    notificationResult.value = {
+      success: false,
+      message: error.response?.data?.error || 'Failed to send notification'
+    }
+  } finally {
+    sendingNotifications.value = false
+    
+    setTimeout(() => {
+      notificationResult.value = null
+    }, 5000)
+  }
+}
+
+const formatDate = (dateString: string | null) => {
+  if (!dateString) return '-'
+  const date = new Date(dateString)
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  })
+}
+
+const getDateStatus = (dateString: string | null) => {
+  if (!dateString) return null
+  const date = new Date(dateString)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  date.setHours(0, 0, 0, 0)
+  
+  const diffDays = Math.ceil((date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+  
+  if (diffDays < 0) return 'overdue'
+  if (diffDays <= 7) return 'upcoming'
+  return 'future'
+}
+
+const getIssueTypeIcon = (type: string) => {
+  switch (type.toLowerCase()) {
+    case 'story': return { icon: '📖', color: 'text-green-600' }
+    case 'bug': return { icon: '🐛', color: 'text-red-600' }
+    case 'task': return { icon: '✅', color: 'text-blue-600' }
+    case 'epic': return { icon: '⚡', color: 'text-purple-600' }
+    default: return { icon: '📋', color: 'text-gray-600' }
+  }
+}
+
+const truncateText = (text: string | null, maxLength: number = 50) => {
+  if (!text) return '-'
+  if (text.length <= maxLength) return text
+  return text.substring(0, maxLength) + '...'
+}
+
+const getLabelColor = (index: number) => {
+  const colors = [
+    'bg-purple-100 text-purple-800',
+    'bg-blue-100 text-blue-800',
+    'bg-green-100 text-green-800',
+    'bg-yellow-100 text-yellow-800',
+    'bg-pink-100 text-pink-800',
+    'bg-indigo-100 text-indigo-800'
+  ]
+  return colors[index % colors.length]
+}
+</script>
+
+<template>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+    <div class="px-6 py-4 bg-gray-50 border-b border-gray-200">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-semibold text-gray-900">Issue Details</h2>
+          <p class="text-sm text-gray-500 mt-1">
+            {{ filteredIssues.length }} issues 
+            <span v-if="showOnlyNotReady" class="text-red-600 font-medium">(Not Ready only)</span>
+            <span v-else>(Stories, Tasks, Bugs only)</span>
+            <span class="text-gray-400">• {{ issuesGroupedByAssignee.length }} assignees</span>
+          </p>
+        </div>
+        <div class="flex items-center gap-4">
+          <!-- Filter Toggle Button -->
+          <button
+            @click="showFilters = !showFilters"
+            :class="[
+              'inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors',
+              showFilters || excludedUserIds.size > 0 || excludedLabels.size > 0
+                ? 'bg-blue-50 border-blue-200 text-blue-700'
+                : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+            ]"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+            </svg>
+            Filters
+            <span 
+              v-if="excludedUserIds.size > 0 || excludedLabels.size > 0"
+              class="inline-flex items-center justify-center w-5 h-5 text-xs font-bold bg-blue-600 text-white rounded-full"
+            >
+              {{ excludedUserIds.size + excludedLabels.size }}
+            </span>
+          </button>
+          
+          <!-- Ready Count -->
+          <button
+            @click="showOnlyNotReady = false"
+            :class="[
+              'flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors',
+              !showOnlyNotReady 
